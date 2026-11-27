@@ -50,6 +50,25 @@ function paletteModes(rgba, n, colours) {
   return out;
 }
 
+/**
+ * When every pixel is opaque or fully transparent, and all transparent pixels share one colour that no opaque pixel
+ * has, a tRNS colour key says "transparent" with no alpha channel. Returns that colour as [r, g, b], or null.
+ */
+function transparentKey(rgba, n) {
+  let key = -1;
+  for (let i = 0, d = 0; i < n; i++, d += 4) {
+    const a = rgba[d + 3];
+    if (a === 255) continue;
+    if (a !== 0) return null;
+    const c = (rgba[d] << 16) | (rgba[d + 1] << 8) | rgba[d + 2];
+    if (key < 0) key = c; else if (key !== c) return null;
+  }
+  if (key < 0) return null;
+  const kr = key >> 16, kg = (key >> 8) & 255, kb = key & 255;
+  for (let i = 0, d = 0; i < n; i++, d += 4) if (rgba[d + 3] === 255 && rgba[d] === kr && rgba[d + 1] === kg && rgba[d + 2] === kb) return null;
+  return [kr, kg, kb];
+}
+
 export function buildModes(rgba, width, height) {
   const n = width * height;
   const a = analyse(rgba, n);
@@ -66,8 +85,19 @@ export function buildModes(rgba, width, height) {
       modes.push({ name: 'grey-alpha', ctype: 4, bpp: 2, samples: s });
     }
   }
+  const key = !a.opaque && !a.colours ? transparentKey(rgba, n) : null;
+  if (key && a.grey) {
+    const s = new Uint8Array(n);
+    for (let i = 0; i < n; i++) s[i] = rgba[i * 4];
+    modes.push({ name: 'grey-key', ctype: 0, bpp: 1, samples: s, trns: Uint8Array.of(0, key[0]) });
+  } else if (key) {
+    const s = new Uint8Array(n * 3);
+    for (let i = 0; i < n; i++) { s[i * 3] = rgba[i * 4]; s[i * 3 + 1] = rgba[i * 4 + 1]; s[i * 3 + 2] = rgba[i * 4 + 2]; }
+    modes.push({ name: 'rgb-key', ctype: 2, bpp: 3, samples: s, trns: Uint8Array.of(0, key[0], 0, key[1], 0, key[2]) });
+  }
   // Full colour is only worth building when no palette or grey form exists (they are always smaller).
   if (!a.colours && !a.grey) {
+    // (kept even when a key form exists: the alpha channel can still compress better or worse)
     if (a.opaque) {
       const s = new Uint8Array(n * 3);
       for (let i = 0; i < n; i++) { s[i * 3] = rgba[i * 4]; s[i * 3 + 1] = rgba[i * 4 + 1]; s[i * 3 + 2] = rgba[i * 4 + 2]; }

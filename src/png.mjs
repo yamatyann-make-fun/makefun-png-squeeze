@@ -71,8 +71,13 @@ export function decodePng(file) {
     const s = i * ch, d = i * 4;
     let r, g, b, a = 255;
     if (ctype === 6) { r = px[s]; g = px[s + 1]; b = px[s + 2]; a = px[s + 3]; }
-    else if (ctype === 2) { r = px[s]; g = px[s + 1]; b = px[s + 2]; }
-    else if (ctype === 0) r = g = b = px[s];
+    else if (ctype === 2) {
+      r = px[s]; g = px[s + 1]; b = px[s + 2];
+      if (trns && trns.length >= 6 && r === trns[1] && g === trns[3] && b === trns[5]) a = 0; // tRNS colour key
+    } else if (ctype === 0) {
+      r = g = b = px[s];
+      if (trns && trns.length >= 2 && r === trns[1]) a = 0;
+    }
     else if (ctype === 4) { r = g = b = px[s]; a = px[s + 1]; }
     else { const k = px[s]; r = plte[k * 3]; g = plte[k * 3 + 1]; b = plte[k * 3 + 2]; a = trns && k < trns.length ? trns[k] : 255; }
     rgba[d] = r; rgba[d + 1] = g; rgba[d + 2] = b; rgba[d + 3] = a;

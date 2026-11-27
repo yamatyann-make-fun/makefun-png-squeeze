@@ -268,9 +268,21 @@ export function deflateOptimal(data, opts = {}) {
     tablesFrom(hl, hd, tab0);
   }
   let tok = parse(data, mm, [tab0], [0]);
-  let best = null, bestIt = 0;
+  let best = null, bestIt = 0, prevPos = null;
+  const resplit = opts.resplit ?? 1;
   for (let it = 0; ; it++) {
-    const starts = splitBlocks(tok, chunk);
+    // Re-split only every few rounds (it is the costly step); in between keep the previous block boundaries.
+    let starts;
+    if (prevPos === null || it % resplit === 0) starts = splitBlocks(tok, chunk);
+    else {
+      starts = [];
+      for (const pos of prevPos) {
+        let lo = 0, hi = tok.count;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (tok.tp[mid] < pos) lo = mid + 1; else hi = mid; }
+        if (starts.length === 0 || lo > starts[starts.length - 1]) starts.push(lo);
+      }
+    }
+    prevPos = starts.map((k) => tok.tp[k]);
     const ends = starts.map((s, k) => (k + 1 < starts.length ? starts[k + 1] : tok.count));
     let bits = 0;
     for (let k = 0; k < starts.length; k++) { histogram(tok, starts[k], ends[k], lit, dist); bits += blockBits(lit, dist); }
