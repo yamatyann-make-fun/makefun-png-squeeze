@@ -14,9 +14,9 @@ const cases = {
 };
 let bad = 0;
 for (const [name, data] of Object.entries(cases)) {
-  const z = deflateOptimal(data, { iterations: 3 });
+  const z = deflateOptimal(data, { iterations: 3, bt: 256 });
   const ok = Buffer.compare(inflateSync(z), Buffer.from(data)) === 0;
-  const again = Buffer.compare(deflateOptimal(data, { iterations: 3 }), z) === 0;
+  const again = Buffer.compare(deflateOptimal(data, { iterations: 3, bt: 256 }), z) === 0;
   console.log(name.padEnd(9), String(data.length).padStart(7), '->', String(z.length).padStart(6), 'zlib9', String(deflateSync(data, { level: 9 }).length).padStart(6), ok ? 'ok' : 'MISMATCH', again ? 'det' : 'NONDET');
   if (!ok || !again) bad++;
 }

@@ -12,7 +12,7 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const FINAL = { chain: 1024, iterations: 40, patience: 2, chunk: 250, resplit: 3, nice: 258 };
+const FINAL = { bt: 1024, iterations: 40, patience: 2, chunk: 250, resplit: 3 };
 const BIASES = [0, 40]; // row-to-row filter stickiness tried by the brute-force selector (bytes)
 
 function zlibSize(raw: Uint8Array): number {

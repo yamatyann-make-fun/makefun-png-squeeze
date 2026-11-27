@@ -52,6 +52,50 @@ function findMatches(data, maxChain, nice) {
   return { off, pool };
 }
 
+/**
+ * Binary-tree match search (as in LZ-family encoders): every position is inserted in a tree keyed on the bytes that
+ * follow it, so one descent reports, for each length that first becomes possible, the nearest distance, without a
+ * chain limit on what can be found (only `cut` bounds the work per position). Same output shape as findMatches.
+ */
+function findMatchesBT(data, cut) {
+  const n = data.length, W = 32768;
+  const head = new Int32Array(1 << 16); // position + 1 of the newest suffix with this 3-byte hash; 0 = empty
+  const son = new Int32Array(2 * W);    // per window slot: [smaller child, larger child], positions + 1
+  const off = new Int32Array(n + 1);
+  let pool = new Uint32Array(Math.max(1024, n * 2)), top = 0;
+  for (let i = 0; i < n; i++) {
+    off[i] = top;
+    if (i + 2 >= n) continue;
+    const h = Math.imul((data[i] << 16) | (data[i + 1] << 8) | data[i + 2], 0x9e3779b1) >>> 16;
+    const lenLimit = Math.min(258, n - i);
+    let cur = head[h];
+    head[h] = i + 1;
+    const slot = i & (W - 1);
+    let ptrLess = slot * 2, ptrMore = slot * 2 + 1; // where the next smaller / larger subtree hangs
+    let lenLess = 0, lenMore = 0, best = 2, count = cut;
+    for (;;) {
+      const cm = cur - 1; // candidate position
+      const delta = i - cm;
+      if (cur === 0 || count-- === 0 || delta >= W) { son[ptrLess] = 0; son[ptrMore] = 0; break; }
+      const nslot = cm & (W - 1);
+      let len = lenLess < lenMore ? lenLess : lenMore;
+      if (data[cm + len] === data[i + len]) {
+        while (++len < lenLimit && data[cm + len] === data[i + len]);
+        if (len > best) {
+          best = len;
+          if (top === pool.length) { const g = new Uint32Array(pool.length * 2); g.set(pool); pool = g; }
+          pool[top++] = ((delta - 1) << 9) | (len - 3);
+          if (len === lenLimit) { son[ptrLess] = son[nslot * 2]; son[ptrMore] = son[nslot * 2 + 1]; break; }
+        }
+      }
+      if (data[cm + len] < data[i + len]) { son[ptrLess] = cur; ptrLess = nslot * 2 + 1; cur = son[ptrLess]; lenLess = len; }
+      else { son[ptrMore] = cur; ptrMore = nslot * 2; cur = son[ptrMore]; lenMore = len; }
+    }
+  }
+  off[n] = top;
+  return { off, pool };
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Cost model from symbol statistics (entropy based, as in zopfli).
 
@@ -253,7 +297,7 @@ export function deflateOptimal(data, opts = {}) {
   const patience = opts.patience ?? 1e9;
   const chain = opts.chain ?? 64, iterations = opts.iterations ?? 3, chunk = opts.chunk ?? 600;
   const n = data.length;
-  const mm = findMatches(data, chain, opts.nice ?? 258);
+  const mm = opts.bt ? findMatchesBT(data, opts.bt) : findMatches(data, chain, opts.nice ?? 258);
   const lit = new Int32Array(288), dist = new Int32Array(30);
   // first model: statistics of a greedy (longest match) parse
   const tab0 = newTables();
