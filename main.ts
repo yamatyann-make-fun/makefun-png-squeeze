@@ -12,7 +12,7 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const FINAL = { bt: 1024, iterations: 40, patience: 2, chunk: 250, resplit: 3 };
+const FINAL = { bt: 1024, iterations: 22, patience: 2, chunk: 250, resplit: 3 };
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
 const LIGHT_BIG = { bt: 24, iterations: 1, chunk: 2000 };
 const SETTLE = 1.03;
