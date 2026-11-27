@@ -127,7 +127,7 @@ export function chooseBrute(all, height, rl, level = 6, bias = 0, first = 0) {
  * before it, and the smallest is kept. A band of one filter keeps rows matching each other; the brute-force rows
  * win where the content changes inside the band.
  */
-export function chooseBands(all, height, rl, band = 16, level = 9, perRow = null, ahead = null) {
+export function chooseBands(all, height, rl, band = 16, level = 9, perRow = null, ahead = null, same = null, upMode = 0) {
   const choice = new Uint8Array(height);
   const hist = new Uint8Array(32768);
   let have = 0;
@@ -138,8 +138,10 @@ export function chooseBands(all, height, rl, band = 16, level = 9, perRow = null
     const dict = have > 0 ? hist.slice(0, have) : undefined;
     const fill = (pick) => { for (let y = y0; y < y1; y++) buf.set(all[pick(y)].subarray(y * rl, (y + 1) * rl), (y - y0) * rl); };
     let best = Infinity, bestPick = null;
-    const cands = [0, 1, 2, 3, 4].map((t) => () => t);
+    let cands = [0, 1, 2, 3, 4].map((t) => () => t);
     for (const pr of perRow ? (Array.isArray(perRow) ? perRow : [perRow]) : []) cands.push((y) => pr[y]);
+    // upMode 1: rows identical to the row above are also tried as Up (all zeros) in every candidate; 2: only that
+    if (same && upMode) { const up = cands.map((p) => (y) => (same[y] ? 2 : p(y))); cands = upMode === 1 ? cands.concat(up) : up; }
     const y2 = ahead ? Math.min(height, y1 + band) : y1;
     for (const pick of cands) {
       fill(pick);
@@ -160,4 +162,16 @@ export function chooseBands(all, height, rl, band = 16, level = 9, perRow = null
     hist.set(src, have); have += src.length;
   }
   return choice;
+}
+
+/** 1 for each row whose samples equal the row above (where Up writes all zeros), else 0. */
+export function sameRows(samples, stride, height) {
+  const same = new Uint8Array(height);
+  for (let y = 1; y < height; y++) {
+    const a = y * stride, b = a - stride;
+    let eq = 1;
+    for (let x = 0; x < stride; x++) if (samples[a + x] !== samples[b + x]) { eq = 0; break; }
+    same[y] = eq;
+  }
+  return same;
 }

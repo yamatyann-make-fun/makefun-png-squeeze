@@ -6,7 +6,7 @@ import { deflateSync, constants } from 'node:zlib';
 import { assemblePng, decodePng } from './src/png.mjs';
 import { deflateOptimal } from './src/deflate.mjs';
 import { buildModes } from './src/modes.mjs';
-import { assembleRows, chooseBands, chooseBrute, chooseEntropy, chooseMinSum, constant, filterAll } from './src/filter.mjs';
+import { assembleRows, chooseBands, chooseBrute, chooseEntropy, chooseMinSum, constant, filterAll, sameRows } from './src/filter.mjs';
 
 const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
@@ -53,7 +53,8 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     m.cands.sort((a: Cand, b: Cand) => a.size - b.size);
     const add = (name: string, raw: Uint8Array) => pool.push({ name: m.mode.name + '/' + name, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
     const perRow = chooseBrute(m.all, height, m.rl, 6, 0, 2);
-    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, 9, [perRow]), m.rl));
+    const same = bigImage ? null : sameRows(m.mode.samples, m.rl - 1, height);
+    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, 9, [perRow], null, same, same ? 1 : 0), m.rl));
     if (bigImage) continue;
     pool.push(m.cands[0]);
     if (!m.cands[0].name.endsWith('/f0')) pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
