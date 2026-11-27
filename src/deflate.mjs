@@ -197,9 +197,12 @@ function histogram(tok, a, b, lit, dist) {
 const FIXED_LIT = new Uint8Array(288), FIXED_DIST = new Uint8Array(30).fill(5);
 for (let i = 0; i < 288; i++) FIXED_LIT[i] = i < 144 ? 8 : i < 256 ? 9 : i < 280 ? 7 : 8;
 
+// block costs while splitting use one run-length variant of the header (the exact best one is written): ~2 s saved
+let QUICK_HEADER = true;
+export function setQuickHeader(v) { QUICK_HEADER = v; }
 const scratchL = new Uint8Array(288), scratchD = new Uint8Array(30);
 /** Exact bit cost of a block (best of dynamic and fixed) for its histograms. */
-function blockBits(lit, dist) {
+function blockBits(lit, dist, quick = QUICK_HEADER) {
   huffLengths(lit, 286, 15, scratchL);
   huffLengths(dist, 30, 15, scratchD);
   let data = 0, fixed = 0;
@@ -210,7 +213,7 @@ function blockBits(lit, dist) {
     fixed += lit[s] * (FIXED_LIT[s] + xb);
   }
   for (let s = 0; s < 30; s++) { if (!dist[s]) continue; data += dist[s] * (scratchD[s] + DIST_XB[s]); fixed += dist[s] * (5 + DIST_XB[s]); }
-  const dyn = 3 + bestHeader(scratchL, scratchD).bits + data;
+  const dyn = 3 + bestHeader(scratchL, scratchD, quick ? 1 : 8).bits + data;
   return Math.min(dyn, 3 + fixed);
 }
 

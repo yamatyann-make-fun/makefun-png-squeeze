@@ -15,7 +15,7 @@ Entry for make.fun's "Squeeze screenshots into the smallest PNG, 27 November 202
    parsing iterated until it stops improving, greedy block merging, length-limited Huffman codes and a cheapest
    run-length-coded dynamic header.
 
-All search is bounded by work, never by the clock, so two runs write identical bytes (about 19 s for a set (24 s in the grader's Docker sandbox here). In the grader each zlib call costs about 2 ms, so the code makes under 2,000 of them. The work runs in a child Node with --single-threaded, since the sandbox has one CPU but V8 would start helper threads for every host core on one
+All search is bounded by work, never by the clock, so two runs write identical bytes (about 15 s for a set (16 s in the grader's Docker sandbox here; the grader itself has taken up to ~2.4x that). In the grader each zlib call costs about 2 ms, so the code makes under 2,000 of them. The work runs in a child Node with --single-threaded, since the sandbox has one CPU but V8 would start helper threads for every host core on one
 modern core; the limit is 60 s).
 
 ## Tests
@@ -29,6 +29,6 @@ node tests/huffman-check.mjs
 node tests/modes-check.mjs
 ```
 
-Practice set: 800,470 against the fixed-paeth baseline's 420,399.
+Practice set: 800,321 against the fixed-paeth baseline's 420,399.
 
 MIT licensed.

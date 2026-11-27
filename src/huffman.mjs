@@ -100,14 +100,15 @@ const CL_EXTRA = { 16: 2, 17: 3, 18: 7 };
  * The cheapest dynamic header for the given lit/len and distance code lengths. Returns
  * { bits, hlit, hdist, hclen, items, clLengths } where items are the run-length symbols to emit.
  */
-export function bestHeader(litLen, distLen) {
+export function bestHeader(litLen, distLen, masks = 8) {
   let hlit = 286; while (hlit > 257 && litLen[hlit - 1] === 0) hlit--;
   let hdist = 30; while (hdist > 1 && distLen[hdist - 1] === 0) hdist--;
   const seq = new Uint8Array(hlit + hdist);
   seq.set(litLen.subarray(0, hlit), 0); seq.set(distLen.subarray(0, hdist), hlit);
   let best = null;
   const freq = new Int32Array(19), clLen = new Uint8Array(19);
-  for (let mask = 0; mask < 8; mask++) {
+  // masks < 8: only the variant with every run code allowed (the usual winner), for quick estimates
+  for (let mask = masks < 8 ? 7 : 0; mask < 8; mask++) {
     const items = rle(seq, !!(mask & 1), !!(mask & 2), !!(mask & 4));
     freq.fill(0);
     for (const [s] of items) freq[s]++;
