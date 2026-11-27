@@ -8,7 +8,7 @@ Entry for make.fun's "Squeeze screenshots into the smallest PNG, 27 November 202
 
 1. **Representation** (`src/modes.mjs`): palette (by frequency, transparent entries first so tRNS stays short),
    grey, grey + alpha, RGB or RGBA, and RGB / grey with a tRNS colour key when transparency allows it.
-2. **Row filters** (`src/filter.mjs`): a band search (each band of 24 rows takes one filter, or Up on repeated rows, whichever compresses smallest after the 32 KiB before it, then a finer pass over bands of 6 rows judged with the rows after them), constant filters; the per-row brute-force selector (each row compressed
+2. **Row filters** (`src/filter.mjs`): a band search (each band of 32 rows takes one filter, or Up on repeated rows, whichever compresses smallest after the 32 KiB before it, then finer passes over bands of 12 and 6 rows judged with the rows after them), constant filters; the per-row brute-force selector (each row compressed
    each row with every filter primed by the 32 KiB written before it (with a "stay on the previous filter" bias).
    Candidates are screened with zlib.
 3. **Deflate** (`src/deflate.mjs`, `src/huffman.mjs`, `src/wasm.mjs`): our own encoder, its two hot loops also as WebAssembly assembled from opcodes in `src/wasm.mjs` — binary-tree match search, cost-model optimal
@@ -29,6 +29,6 @@ node tests/huffman-check.mjs
 node tests/modes-check.mjs
 ```
 
-Practice set: 801,619 against the fixed-paeth baseline's 420,399.
+Practice set: 802,606 against the fixed-paeth baseline's 420,399.
 
 MIT licensed.

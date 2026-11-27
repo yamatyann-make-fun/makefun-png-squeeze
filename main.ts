@@ -15,13 +15,13 @@ const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
 const FINALS = [{ bt: 1024, iterations: 14, patience: 2, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 }];
-const LIGHT_SETTLE = true; // small images: candidates settled by the light encoder (cheap now the kernels are WASM)
+const LIGHT_SETTLE = false; // settling small images' candidates with the light encoder: the band choice always won, so off
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
 // zlib level that judges the first band pass (level 9 is ten times slower on these images and, once the finer
 // passes follow, no better)
 const BAND_LEVELS_BIG = [7], BAND_LEVELS_SMALL = [7];
-const REFINE = [6]; // rows per band in the finer passes
-const BAND = 24; // rows per band in the band filter search
+const REFINE = [12, 6]; // rows per band in the finer passes
+const BAND = 32; // rows per band in the band filter search
 
 function zlibSize(raw: Uint8Array): number {
   return deflateSync(raw, { level: 5, memLevel: 8, strategy: constants.Z_DEFAULT_STRATEGY }).length;
