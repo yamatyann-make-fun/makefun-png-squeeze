@@ -14,7 +14,7 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const FINAL = { bt: 1024, iterations: 8, patience: 1, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 };
+const FINALS = [{ bt: 1024, iterations: 14, patience: 2, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 }];
 const LIGHT_SETTLE = true; // small images: candidates settled by the light encoder (cheap now the kernels are WASM)
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
 const BAND_LEVELS_BIG = [9], BAND_LEVELS_SMALL = [9]; // zlib levels that judge the bands (each a candidate)
@@ -62,8 +62,8 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     m.cands.sort((a: Cand, b: Cand) => a.size - b.size);
     const add = (name: string, raw: Uint8Array) => pool.push({ name: m.mode.name + '/' + name, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
     const same = bigImage ? null : sameRows(m.mode.samples, m.rl - 1, height);
-    // small images also offer the per-row brute-force choice to each band (it helps grey images by ~2%)
-    const perRow = bigImage ? [] : [chooseBrute(m.all, height, m.rl, 6, 0, 2)];
+    // (no per-row brute force: its thousands of small zlib calls cost ~2 ms each in the grader's sandbox)
+    const perRow: Uint8Array[] = [];
     for (const lv of bigImage ? BAND_LEVELS_BIG : BAND_LEVELS_SMALL) add('band' + lv, assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, lv, perRow, null, same, same ? 1 : 0), m.rl));
     if (bigImage || !LIGHT_SETTLE) continue;
     pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
@@ -85,7 +85,10 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
   }
   // Stage C: the winner at full strength.
   if (DEBUG) console.error(win.name, winSize);
-  return png(win, FINAL);
+  // (each entry of FINALS is a full encode; the smallest file is kept)
+  let best: Uint8Array | null = null;
+  for (const opts of FINALS) { const f = png(win, opts); if (best === null || f.length < best.length) best = f; }
+  return best!;
 }
 
 function runAll(): void {
