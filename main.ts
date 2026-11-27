@@ -17,7 +17,10 @@ const DEBUG = !!process.env.SQUEEZE_DEBUG;
 const FINALS = [{ bt: 1024, iterations: 14, patience: 2, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 }];
 const LIGHT_SETTLE = true; // small images: candidates settled by the light encoder (cheap now the kernels are WASM)
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
-const BAND_LEVELS_BIG = [9], BAND_LEVELS_SMALL = [9]; // zlib levels that judge the bands (each a candidate)
+// zlib level that judges the first band pass (level 9 is ten times slower on these images and, once the finer
+// passes follow, no better)
+const BAND_LEVELS_BIG = [7], BAND_LEVELS_SMALL = [7];
+const REFINE = [6]; // rows per band in the finer passes
 const BAND = 24; // rows per band in the band filter search
 
 function zlibSize(raw: Uint8Array): number {
@@ -69,9 +72,9 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     const filters = grey ? [0, 1, 2, 3, 4] : [0, 1, 2, 4];
     for (const lv of bigImage ? BAND_LEVELS_BIG : BAND_LEVELS_SMALL) {
       let choice = chooseBands(m.all, height, m.rl, BAND, lv, perRow, null, same, same ? 1 : 0, filters);
-      // grey images: a second, finer pass (bands of 8 rows, each judged with the 8 rows after it as they stand)
-      // refines the choice by about 1%; palette and colour images gain nothing from it
-      if (grey) choice = chooseBands(m.all, height, m.rl, 8, 6, [choice], choice, null, 0, filters);
+      // finer passes: bands of 12, 6, then 3 rows, each judged with as many rows after it as they stand (the
+      // current choice is a candidate too, so a pass never makes the zlib judge's total worse)
+      for (const r of REFINE) choice = chooseBands(m.all, height, m.rl, r, 6, [choice], choice, null, 0, filters);
       add('band' + lv, assembleRows(m.all, choice, m.rl));
     }
     if (bigImage || !LIGHT_SETTLE) continue;

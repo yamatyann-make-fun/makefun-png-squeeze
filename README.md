@@ -8,14 +8,14 @@ Entry for make.fun's "Squeeze screenshots into the smallest PNG, 27 November 202
 
 1. **Representation** (`src/modes.mjs`): palette (by frequency, transparent entries first so tRNS stays short),
    grey, grey + alpha, RGB or RGBA, and RGB / grey with a tRNS colour key when transparency allows it.
-2. **Row filters** (`src/filter.mjs`): a band search (each band of 24 rows takes one filter, the per-row brute-force choice, or Up on repeated rows, whichever compresses smallest after the 32 KiB before it), constant filters; the per-row brute-force selector (each row compressed
+2. **Row filters** (`src/filter.mjs`): a band search (each band of 24 rows takes one filter, or Up on repeated rows, whichever compresses smallest after the 32 KiB before it, then a finer pass over bands of 6 rows judged with the rows after them), constant filters; the per-row brute-force selector (each row compressed
    each row with every filter primed by the 32 KiB written before it (with a "stay on the previous filter" bias).
    Candidates are screened with zlib.
 3. **Deflate** (`src/deflate.mjs`, `src/huffman.mjs`, `src/wasm.mjs`): our own encoder, its two hot loops also as WebAssembly assembled from opcodes in `src/wasm.mjs` — binary-tree match search, cost-model optimal
    parsing iterated until it stops improving, greedy block merging, length-limited Huffman codes and a cheapest
    run-length-coded dynamic header.
 
-All search is bounded by work, never by the clock, so two runs write identical bytes (about 15 s for a set (16 s in the grader's Docker sandbox here; the grader itself has taken up to ~2.4x that). In the grader each zlib call costs about 2 ms, so the code makes under 2,000 of them. The work runs in a child Node with --single-threaded, since the sandbox has one CPU but V8 would start helper threads for every host core on one
+All search is bounded by work, never by the clock, so two runs write identical bytes (about 14 s for a set (15 s in the grader's Docker sandbox here; the grader itself has taken up to ~3x that). In the grader each zlib call costs about 2 ms, so the code makes under 2,000 of them. The work runs in a child Node with --single-threaded, since the sandbox has one CPU but V8 would start helper threads for every host core on one
 modern core; the limit is 60 s).
 
 ## Tests
@@ -29,6 +29,6 @@ node tests/huffman-check.mjs
 node tests/modes-check.mjs
 ```
 
-Practice set: 801,017 against the fixed-paeth baseline's 420,399.
+Practice set: 801,354 against the fixed-paeth baseline's 420,399.
 
 MIT licensed.
