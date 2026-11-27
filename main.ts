@@ -2,6 +2,8 @@
 // filters) and write it with a deflate encoder of our own. Deterministic: all search is bounded by work, never by time.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { deflateSync, constants } from 'node:zlib';
 import { assemblePng, decodePng } from './src/png.mjs';
 import { deflateOptimal } from './src/deflate.mjs';
@@ -50,17 +52,17 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
   const bigImage = modes[0].mode.samples.length > 1e6;
   const keep = modes.filter((m: any, k: number) => k < (bigImage ? 1 : 3) && m.best <= modes[0].best * 1.03);
 
-  // Stage B: row filters for the leading representations. The band search (each band of rows takes one filter, or
-  // the per-row brute-force choice, whichever compresses smallest after the 32 KiB before it) is the strong one; for
+  // Stage B: row filters for the leading representations. The band search (each band of rows takes the one filter
+  // that compresses it smallest after the 32 KiB before it; the per-row brute force added nothing to it and cost
+  // thousands of zlib calls) is the strong one; for
   // a big image it is taken as it is, while a small image's candidates are settled by the real encoder at light
   // strength (zlib misjudges the unfiltered form there by several percent).
   const pool: Cand[] = [];
   for (const m of keep) {
     m.cands.sort((a: Cand, b: Cand) => a.size - b.size);
     const add = (name: string, raw: Uint8Array) => pool.push({ name: m.mode.name + '/' + name, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
-    const perRow = chooseBrute(m.all, height, m.rl, 6, 0, 2);
     const same = bigImage ? null : sameRows(m.mode.samples, m.rl - 1, height);
-    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, BAND_LEVEL, [perRow], null, same, same ? 1 : 0), m.rl));
+    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, BAND_LEVEL, [], null, same, same ? 1 : 0), m.rl));
     if (bigImage || !LIGHT_SETTLE) continue;
     pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
   }
@@ -84,8 +86,22 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
   return png(win, FINAL);
 }
 
-for (const id of readdirSync(I).sort()) {
-  const image = decodePng(new Uint8Array(readFileSync(join(I, id, 'image.png'))));
-  mkdirSync(join(O, id), { recursive: true });
-  writeFileSync(join(O, id, 'image.png'), squeeze(image.rgba, image.width, image.height));
+function runAll(): void {
+  for (const id of readdirSync(I).sort()) {
+    const image = decodePng(new Uint8Array(readFileSync(join(I, id, 'image.png'))));
+    mkdirSync(join(O, id), { recursive: true });
+    writeFileSync(join(O, id, 'image.png'), squeeze(image.rgba, image.width, image.height));
+  }
+}
+
+// The sandbox gives one CPU, but V8 starts helper threads for every core the host has (GC, compiler) and they all
+// compete for that one CPU. So the work runs in a child Node with --single-threaded (V8 does everything on the main
+// thread). The output is the same bytes either way; if the child cannot run, the work runs here instead.
+if (process.env.SQUEEZE_CHILD === '1') runAll();
+else {
+  const child = spawnSync(process.execPath, ['--single-threaded', ...process.execArgv, fileURLToPath(import.meta.url)], {
+    stdio: 'inherit',
+    env: { ...process.env, SQUEEZE_CHILD: '1' },
+  });
+  if (child.status !== 0) runAll();
 }

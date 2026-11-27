@@ -126,10 +126,11 @@ function tablesFrom(litHist, distHist, tab) {
 // blockStart[k] is the first position governed by tables[k]. Returns tokens { tl, td, tp, count }:
 // tl = match length (0 for a literal), td = literal byte or match distance, tp = start position.
 
-function parse(data, mm, tables, blockStart, sparse = 258) {
+function parse(data, mm, tables, blockStart, sparse = 258, scratch = null) {
   const n = data.length, { off, pool } = mm;
-  const cost = new Float64Array(n + 1).fill(Infinity);
-  const pLen = new Uint16Array(n + 1), pDist = new Uint16Array(n + 1);
+  // the big work arrays are reused from round to round (fresh ones each round only cost page faults and GC)
+  const cost = scratch ? scratch.cost.fill(Infinity) : new Float64Array(n + 1).fill(Infinity);
+  const pLen = scratch ? scratch.pLen : new Uint16Array(n + 1), pDist = scratch ? scratch.pDist : new Uint16Array(n + 1);
   cost[0] = 0;
   let bi = 0, tab = tables[0], nextB = blockStart.length > 1 ? blockStart[1] : Infinity;
   for (let i = 0; i < n; i++) {
@@ -362,7 +363,8 @@ export function deflateOptimal(data, opts = {}) {
       for (let l = 3; l <= 258; l++) tab0.len[l] += opts.litPenalty ?? 2;
     }
   }
-  let tok = parse(data, mm, [tab0], [0], opts.sparse ?? 258);
+  const scratch = { cost: new Float64Array(n + 1), pLen: new Uint16Array(n + 1), pDist: new Uint16Array(n + 1) };
+  let tok = parse(data, mm, [tab0], [0], opts.sparse ?? 258, scratch);
   let best = null, bestIt = 0, prevPos = null;
   const resplit = opts.resplit ?? 1;
   for (let it = 0; ; it++) {
@@ -391,7 +393,7 @@ export function deflateOptimal(data, opts = {}) {
       tables.push(tablesFrom(lit, dist, newTables()));
       blockStart.push(tok.tp[starts[k]]);
     }
-    tok = parse(data, mm, tables, blockStart, opts.sparse ?? 258);
+    tok = parse(data, mm, tables, blockStart, opts.sparse ?? 258, scratch);
   }
   const w = new Bits(Math.max(1024, n >> 2));
   w.put(0x78, 8); w.put(0xda, 8);
