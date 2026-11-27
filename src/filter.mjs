@@ -1,3 +1,4 @@
+import { deflateRawSync } from 'node:zlib';
 // PNG scanline filters and per-row filter selection strategies.
 const abs = Math.abs;
 
@@ -85,3 +86,32 @@ export function chooseAdaptive(all, height, rl) {
 }
 
 export function constant(height, t) { return new Uint8Array(height).fill(t); }
+
+/**
+ * Strategy: brute force. Each row is compressed with every filter, as raw deflate primed with the 32 KiB written
+ * before it, and takes the filter whose output is smallest (ties: the lower filter number).
+ */
+export function chooseBrute(all, height, rl, level = 6) {
+  const choice = new Uint8Array(height);
+  const hist = new Uint8Array(32768 + rl);
+  let have = 0; // bytes of history kept at the front of `hist`
+  const dictOf = () => hist.subarray(0, have);
+  for (let y = 0; y < height; y++) {
+    let best = Infinity;
+    const dict = have > 0 ? Uint8Array.from(dictOf()) : undefined;
+    for (let t = 0; t < 5; t++) {
+      const row = all[t].subarray(y * rl, (y + 1) * rl);
+      const z = deflateRawSync(row, { level, memLevel: 9, dictionary: dict });
+      if (z.length < best) { best = z.length; choice[y] = t; }
+    }
+    // append the chosen row to the history window
+    const row = all[choice[y]].subarray(y * rl, (y + 1) * rl);
+    if (have + rl > 32768) {
+      const keep = Math.max(0, 32768 - rl);
+      hist.copyWithin(0, have - keep, have);
+      have = keep;
+    }
+    hist.set(row, have); have += rl;
+  }
+  return choice;
+}
