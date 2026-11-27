@@ -89,10 +89,13 @@ export function constant(height, t) { return new Uint8Array(height).fill(t); }
 
 /**
  * Strategy: brute force. Each row is compressed with every filter, as raw deflate primed with the 32 KiB written
- * before it, and takes the filter whose output is smallest (ties: the lower filter number).
+ * before it, and takes the filter whose output is smallest (ties: the lower filter number). `bias` bytes are knocked
+ * off the filter the previous row used, so runs of one filter (which keep LZ matches between rows valid) win ties of
+ * a few bytes; `first` is the filter that row 0 prefers.
  */
-export function chooseBrute(all, height, rl, level = 6) {
+export function chooseBrute(all, height, rl, level = 6, bias = 0, first = 0) {
   const choice = new Uint8Array(height);
+  let prev = first;
   const hist = new Uint8Array(32768 + rl);
   let have = 0; // bytes of history kept at the front of `hist`
   const dictOf = () => hist.subarray(0, have);
@@ -102,8 +105,10 @@ export function chooseBrute(all, height, rl, level = 6) {
     for (let t = 0; t < 5; t++) {
       const row = all[t].subarray(y * rl, (y + 1) * rl);
       const z = deflateRawSync(row, { level, memLevel: 9, dictionary: dict });
-      if (z.length < best) { best = z.length; choice[y] = t; }
+      const cost = z.length - (t === prev ? bias : 0);
+      if (cost < best) { best = cost; choice[y] = t; }
     }
+    prev = choice[y];
     // append the chosen row to the history window
     const row = all[choice[y]].subarray(y * rl, (y + 1) * rl);
     if (have + rl > 32768) {
