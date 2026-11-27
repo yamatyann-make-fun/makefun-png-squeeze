@@ -8,14 +8,14 @@ Entry for make.fun's "Squeeze screenshots into the smallest PNG, 27 November 202
 
 1. **Representation** (`src/modes.mjs`): palette (by frequency, transparent entries first so tRNS stays short),
    grey, grey + alpha, RGB or RGBA, and RGB / grey with a tRNS colour key when transparency allows it.
-2. **Row filters** (`src/filter.mjs`): constant filters, min-sum, entropy, and a brute-force selector that compresses
+2. **Row filters** (`src/filter.mjs`): a band search (each band of 24 rows takes one filter, the per-row brute-force choice, or Up on repeated rows, whichever compresses smallest after the 32 KiB before it), constant filters, and a brute-force selector that compresses
    each row with every filter primed by the 32 KiB written before it (with a "stay on the previous filter" bias).
    Candidates are screened with zlib.
 3. **Deflate** (`src/deflate.mjs`, `src/huffman.mjs`): our own encoder — binary-tree match search, cost-model optimal
    parsing iterated until it stops improving, greedy block merging, length-limited Huffman codes and a cheapest
    run-length-coded dynamic header.
 
-All search is bounded by work, never by the clock, so two runs write identical bytes (about 32 s for a set on one
+All search is bounded by work, never by the clock, so two runs write identical bytes (about 35 s for a set (36 s pinned to one core) on one
 modern core; the limit is 60 s).
 
 ## Tests
@@ -29,6 +29,6 @@ node tests/huffman-check.mjs
 node tests/modes-check.mjs
 ```
 
-Practice set: 801,653 against the fixed-paeth baseline's 420,399.
+Practice set: 802,398 against the fixed-paeth baseline's 420,399.
 
 MIT licensed.
