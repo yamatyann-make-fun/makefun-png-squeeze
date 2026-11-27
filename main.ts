@@ -27,10 +27,12 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     assemblePng(width, height, c.mode.ctype, c.mode.plte ?? null, c.mode.trns ?? null, deflateOptimal(c.raw, opts));
 
   // Stage A: every representation with the cheap filter strategies, weighed by zlib.
-  const modes = buildModes(rgba, width, height).map((mode: any) => {
+  const built = buildModes(rgba, width, height);
+  const modes = built.map((mode: any) => {
     const rl = width * mode.bpp + 1;
     const all = filterAll(mode.samples, width, height, mode.bpp);
-    const cheap: [string, Uint8Array][] = [
+    // a big image only needs a rough rank of its forms (its filters come from the band search): one strategy
+    const cheap: [string, Uint8Array][] = mode.samples.length > 1e6 ? [['ent', chooseEntropy(all, height, rl)]] : [
       ['f0', constant(height, 0)], ['f2', constant(height, 2)], ['f4', constant(height, 4)],
       ['min', chooseMinSum(all, height, rl)], ['ent', chooseEntropy(all, height, rl)],
     ];
@@ -56,9 +58,7 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     const same = bigImage ? null : sameRows(m.mode.samples, m.rl - 1, height);
     add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, 9, [perRow], null, same, same ? 1 : 0), m.rl));
     if (bigImage) continue;
-    pool.push(m.cands[0]);
-    if (!m.cands[0].name.endsWith('/f0')) pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
-    add('brute', assembleRows(m.all, perRow, m.rl));
+    pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
   }
   pool.sort((a, b) => a.size - b.size);
   let win: Cand = pool.find((c) => c.name.endsWith('/band')) as Cand, winSize = win.size;
