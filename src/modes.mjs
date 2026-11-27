@@ -30,7 +30,6 @@ function paletteModes(rgba, n, colours) {
   });
   const orders = {
     count: (x, y) => x.count !== y.count ? y.count - x.count : x.word - y.word,
-    luma: (x, y) => x.luma !== y.luma ? x.luma - y.luma : x.word - y.word,
     first: (x, y) => x.first - y.first,
   };
   const out = [];

@@ -13,6 +13,8 @@ const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
 const FINAL = { bt: 1024, iterations: 40, patience: 2, chunk: 250, resplit: 3 };
+const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
+const SETTLE = 1.03;
 const BIASES = [0, 40]; // row-to-row filter stickiness tried by the brute-force selector (bytes)
 
 function zlibSize(raw: Uint8Array): number {
@@ -40,24 +42,35 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     return { mode, rl, all, cands, best: Math.min(...cands.map((c) => c.size)) };
   });
   modes.sort((a: any, b: any) => a.best - b.best);
-  const keep = modes.filter((m: any, k: number) => k < 2 && m.best <= modes[0].best * 1.015);
+  const keep = modes.filter((m: any, k: number) => k < 3 && m.best <= modes[0].best * 1.03);
 
-  // Stage B: for the leading representation(s), brute-force row filters at several stickiness levels, plus the
-  // best cheap strategy, each weighed by zlib; the smallest goes on.
-  let win: Cand | null = null, winSize = Infinity;
-  const consider = (c: Cand) => {
-    const size = zlibSize(c.raw) + (c.mode.plte?.length ?? 0);
-    if (DEBUG) console.error('  ', c.name, size);
-    if (size < winSize) { winSize = size; win = c; }
-  };
+  // Stage B: brute-force row filters for the leading representations, then zlib screens all the candidates and the
+  // real encoder (at light strength) settles the ones within a few percent of the best, since the zlib ranking is
+  // only good to about that.
+  const pool: Cand[] = [];
   for (const m of keep) {
     m.cands.sort((a: Cand, b: Cand) => a.size - b.size);
-    consider(m.cands[0]);
+    pool.push(m.cands[0]);
+    if (!m.cands[0].name.endsWith('/f0')) pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
     const firstFilter = m.cands[0].name.endsWith('/f0') ? 0 : 2;
     for (const bias of BIASES) {
       const raw = assembleRows(m.all, chooseBrute(m.all, height, m.rl, 6, bias, firstFilter), m.rl);
-      consider({ name: m.mode.name + '/brute' + bias, mode: m.mode, raw, size: 0 });
+      pool.push({ name: m.mode.name + '/brute' + bias, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
     }
+  }
+  pool.sort((a, b) => a.size - b.size);
+  // small images are judged by the real encoder, and the plain unfiltered form is tried first (zlib undervalues it)
+  const order = pool[0].raw.length <= 1e6 ? [...pool].sort((a, b) => Number(!a.name.endsWith('/f0')) - Number(!b.name.endsWith('/f0')) || a.size - b.size) : pool;
+  let win: Cand | null = null, winSize = Infinity;
+  const tried: Cand[] = [];
+  if (pool[0].raw.length > 1e6) { win = pool[0]; winSize = pool[0].size; } // big images: the zlib screen alone (a light run costs seconds)
+  else for (const c of order) {
+    if (c.size > pool[0].size * 1.3 || tried.length >= 6) continue;
+    if (tried.some((t) => t.mode === c.mode && Buffer.compare(t.raw, c.raw) === 0)) continue; // same bytes already weighed
+    tried.push(c);
+    const size = deflateOptimal(c.raw, LIGHT).length + (c.mode.plte?.length ?? 0);
+    if (DEBUG) console.error('  ', c.name, c.size, size);
+    if (size < winSize) { winSize = size; win = c; }
   }
   // Stage C: the winner at full strength.
   if (DEBUG) console.error((win as unknown as Cand).name, winSize);

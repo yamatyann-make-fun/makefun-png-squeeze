@@ -21,7 +21,7 @@ for (const id of (process.argv[2] ?? 'i001').split(',')) {
       b0: chooseBrute(all, h, rl, 6, 0, 2), b40: chooseBrute(all, h, rl, 6, 40, 0),
     };
     for (const [k, c] of Object.entries(strat)) {
-      const z = deflateOptimal(assembleRows(all, c, rl), { chain: 48, iterations: 3, chunk: 500 });
+      const z = deflateOptimal(assembleRows(all, c, rl), { bt: 128, iterations: 3, chunk: 500 });
       rows.push([z.length + (mode.plte?.length ?? 0), mode.name + '/' + k]);
     }
   }
