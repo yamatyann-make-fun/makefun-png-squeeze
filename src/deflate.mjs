@@ -236,6 +236,33 @@ function splitBlocks(tok, chunk) {
   return out;
 }
 
+/**
+ * Local boundary refinement: each boundary between two blocks is slid over steps of `step` tokens within `radius`
+ * steps either way, wherever that makes the two blocks together cheaper (exact block costs); repeated while it helps.
+ */
+function refineSplits(tok, starts, step, radius) {
+  if (starts.length < 2) return starts;
+  const s = starts.slice();
+  const L1 = new Int32Array(288), D1 = new Int32Array(30), L2 = new Int32Array(288), D2 = new Int32Array(30);
+  const cost = (a, b, L, D) => { histogram(tok, a, b, L, D); return blockBits(L, D); };
+  for (let pass = 0; pass < 3; pass++) {
+    let moved = false;
+    for (let k = 1; k < s.length; k++) {
+      const a = s[k - 1], b = k + 1 < s.length ? s[k + 1] : tok.count;
+      let best = cost(a, s[k], L1, D1) + cost(s[k], b, L2, D2), bestPos = s[k];
+      for (let d = -radius; d <= radius; d++) {
+        const p = s[k] + d * step;
+        if (d === 0 || p <= a || p >= b) continue;
+        const c = cost(a, p, L1, D1) + cost(p, b, L2, D2);
+        if (c < best) { best = c; bestPos = p; }
+      }
+      if (bestPos !== s[k]) { s[k] = bestPos; moved = true; }
+    }
+    if (!moved) break;
+  }
+  return s;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Bit output.
 
@@ -317,7 +344,7 @@ export function deflateOptimal(data, opts = {}) {
   for (let it = 0; ; it++) {
     // Re-split only every few rounds (it is the costly step); in between keep the previous block boundaries.
     let starts;
-    if (prevPos === null || it % resplit === 0) starts = splitBlocks(tok, chunk);
+    if (prevPos === null || it % resplit === 0) { starts = splitBlocks(tok, chunk); if (opts.refine) starts = refineSplits(tok, starts, opts.refine[0], opts.refine[1]); }
     else {
       starts = [];
       for (const pos of prevPos) {
@@ -344,7 +371,11 @@ export function deflateOptimal(data, opts = {}) {
   }
   const w = new Bits(Math.max(1024, n >> 2));
   w.put(0x78, 8); w.put(0xda, 8);
-  const { tok: bt, starts, ends } = best;
+  let { tok: bt, starts, ends } = best;
+  if (opts.refineEnd) {
+    starts = refineSplits(bt, starts, opts.refineEnd[0], opts.refineEnd[1]);
+    ends = starts.map((s, k) => (k + 1 < starts.length ? starts[k + 1] : bt.count));
+  }
   for (let k = 0; k < starts.length; k++) writeBlock(w, bt, starts[k], ends[k], k === starts.length - 1, lit, dist);
   w.flush();
   const out = new Uint8Array(w.pos + 4);

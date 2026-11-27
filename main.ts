@@ -12,7 +12,7 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const FINAL = { bt: 1024, iterations: 22, patience: 2, chunk: 250, resplit: 3 };
+const FINAL = { bt: 1024, iterations: 22, patience: 2, chunk: 250, resplit: 3, refine: [50, 6] };
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
 const BAND = 24; // rows per band in the band filter search
 
