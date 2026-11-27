@@ -303,15 +303,58 @@ class Bits {
   flush() { if (this.n > 0) this.put(0, 8 - this.n); }
 }
 
+/**
+ * Counts smoothed so that neighbouring symbols of similar frequency get equal code lengths: the code-length
+ * sequence then has long runs, which the block header run-length codes cheaply. The data costs a little more; the
+ * caller keeps whichever of the plain and smoothed codes makes the block smaller. Used symbols stay used.
+ */
+function smoothForRuns(counts, n) {
+  const c = Array.from(counts.subarray(0, n));
+  let len = n;
+  while (len > 0 && c[len - 1] === 0) len--;
+  if (len === 0) return Int32Array.from(c);
+  // runs that are already uniform are left alone
+  const keep = new Uint8Array(len + 1);
+  for (let i = 0; i < len; ) {
+    let j = i;
+    while (j < len && c[j] === c[i]) j++;
+    if ((c[i] === 0 && j - i >= 5) || (c[i] !== 0 && j - i >= 7)) keep.fill(1, i, j);
+    i = j;
+  }
+  let stride = 0, sum = 0, ref = (c[0] + c[1 % len] + c[2 % len] + c[3 % len] + 2) >> 2;
+  const out = c.slice();
+  for (let i = 0; i <= len; i++) {
+    const breakHere = i === len || keep[i] || Math.abs(c[i] - ref) >= 4;
+    if (breakHere) {
+      if (stride >= 4 || (stride >= 3 && sum === 0)) {
+        let v = Math.floor((sum + (stride >> 1)) / stride);
+        if (sum > 0 && v < 1) v = 1;
+        for (let k = i - stride; k < i; k++) out[k] = v;
+      }
+      stride = 0; sum = 0;
+      ref = i + 3 < len ? (c[i] + c[i + 1] + c[i + 2] + c[i + 3] + 2) >> 2 : i < len ? c[i] : 0;
+    }
+    stride++;
+    if (i < len) sum += c[i];
+  }
+  for (let i = 0; i < len; i++) if (counts[i] > 0 && out[i] === 0) out[i] = 1;
+  return Int32Array.from(out);
+}
+
 function writeBlock(w, tok, a, b, last, lit, dist) {
   histogram(tok, a, b, lit, dist);
-  const litLen = new Uint8Array(288), distLen = new Uint8Array(30);
-  huffLengths(lit, 286, 15, litLen);
-  huffLengths(dist, 30, 15, distLen);
-  let data = 0, fixed = 0;
-  for (let s = 0; s < 286; s++) { if (!lit[s]) continue; const xb = s >= 257 ? LEN_XB[s - 257] : 0; data += lit[s] * (litLen[s] + xb); fixed += lit[s] * (FIXED_LIT[s] + xb); }
-  for (let s = 0; s < 30; s++) { if (!dist[s]) continue; data += dist[s] * (distLen[s] + DIST_XB[s]); fixed += dist[s] * (5 + DIST_XB[s]); }
-  const hdr = bestHeader(litLen, distLen);
+  // plain codes, and codes from run-smoothed counts for either alphabet: the smallest block wins
+  const lens = (cnt, n) => { const o = new Uint8Array(n === 286 ? 288 : 30); huffLengths(cnt, n, 15, o); return o; };
+  const litOpts = [lens(lit, 286), lens(smoothForRuns(lit, 286), 286)];
+  const distOpts = [lens(dist, 30), lens(smoothForRuns(dist, 30), 30)];
+  let litLen = litOpts[0], distLen = distOpts[0], data = 0, fixed = 0, hdr = null, total = Infinity;
+  for (const L of litOpts) for (const Dl of distOpts) {
+    let d = 0, f = 0;
+    for (let s = 0; s < 286; s++) { if (!lit[s]) continue; const xb = s >= 257 ? LEN_XB[s - 257] : 0; d += lit[s] * (L[s] + xb); f += lit[s] * (FIXED_LIT[s] + xb); }
+    for (let s = 0; s < 30; s++) { if (!dist[s]) continue; d += dist[s] * (Dl[s] + DIST_XB[s]); f += dist[s] * (5 + DIST_XB[s]); }
+    const h = bestHeader(L, Dl);
+    if (h.bits + d < total) { total = h.bits + d; litLen = L; distLen = Dl; data = d; fixed = f; hdr = h; }
+  }
   const useFixed = fixed <= hdr.bits + data;
   w.put(last ? 1 : 0, 1);
   const lc = new Uint16Array(288), dc = new Uint16Array(30);
