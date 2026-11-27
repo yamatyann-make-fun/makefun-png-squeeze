@@ -12,8 +12,10 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const FINAL = { bt: 1024, iterations: 8, patience: 1, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 };
+const FINAL = { bt: 512, iterations: 6, patience: 1, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 };
+const LIGHT_SETTLE = false; // settling small images with the light encoder costs ~3 s for ~0.1%: off, for the grader's slow CPU
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
+const BAND_LEVEL = 6; // zlib level that judges the bands (9 is a little better and slower)
 const BAND = 24; // rows per band in the band filter search
 
 function zlibSize(raw: Uint8Array): number {
@@ -34,7 +36,7 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     const rl = width * mode.bpp + 1;
     const all = filterAll(mode.samples, width, height, mode.bpp);
     // a big image only needs a rough rank of its forms (its filters come from the band search): one strategy
-    const cheap: [string, Uint8Array][] = mode.samples.length > 1e6 ? [['ent', chooseEntropy(all, height, rl)]] : [
+    const cheap: [string, Uint8Array][] = mode.samples.length > 1e6 || !LIGHT_SETTLE ? [['ent', chooseEntropy(all, height, rl)]] : [
       ['f0', constant(height, 0)], ['f2', constant(height, 2)], ['f4', constant(height, 4)],
       ['min', chooseMinSum(all, height, rl)], ['ent', chooseEntropy(all, height, rl)],
     ];
@@ -58,13 +60,13 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     const add = (name: string, raw: Uint8Array) => pool.push({ name: m.mode.name + '/' + name, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
     const perRow = chooseBrute(m.all, height, m.rl, 6, 0, 2);
     const same = bigImage ? null : sameRows(m.mode.samples, m.rl - 1, height);
-    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, 9, [perRow], null, same, same ? 1 : 0), m.rl));
-    if (bigImage) continue;
+    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, BAND_LEVEL, [perRow], null, same, same ? 1 : 0), m.rl));
+    if (bigImage || !LIGHT_SETTLE) continue;
     pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
   }
   pool.sort((a, b) => a.size - b.size);
   let win: Cand = pool.find((c) => c.name.endsWith('/band')) as Cand, winSize = win.size;
-  if (!bigImage) {
+  if (!bigImage && LIGHT_SETTLE) {
     winSize = Infinity;
     const order = [...pool].sort((a, b) => Number(!a.name.endsWith('/f0')) - Number(!b.name.endsWith('/f0')) || a.size - b.size);
     const tried: Cand[] = [];

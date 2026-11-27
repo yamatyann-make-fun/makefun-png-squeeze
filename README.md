@@ -15,7 +15,7 @@ Entry for make.fun's "Squeeze screenshots into the smallest PNG, 27 November 202
    parsing iterated until it stops improving, greedy block merging, length-limited Huffman codes and a cheapest
    run-length-coded dynamic header.
 
-All search is bounded by work, never by the clock, so two runs write identical bytes (about 23 s for a set (24 s pinned to one core; the grader is slower) on one
+All search is bounded by work, never by the clock, so two runs write identical bytes (about 16 s for a set (18 s in the grader's Docker sandbox here; the real grader is over 2.3x slower) on one
 modern core; the limit is 60 s).
 
 ## Tests
@@ -29,6 +29,6 @@ node tests/huffman-check.mjs
 node tests/modes-check.mjs
 ```
 
-Practice set: 801,449 against the fixed-paeth baseline's 420,399.
+Practice set: 798,028 against the fixed-paeth baseline's 420,399.
 
 MIT licensed.
