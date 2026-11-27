@@ -6,7 +6,7 @@ import { deflateSync, constants } from 'node:zlib';
 import { assemblePng, decodePng } from './src/png.mjs';
 import { deflateOptimal } from './src/deflate.mjs';
 import { buildModes } from './src/modes.mjs';
-import { assembleRows, chooseBrute, chooseEntropy, chooseMinSum, constant, filterAll } from './src/filter.mjs';
+import { assembleRows, chooseBands, chooseBrute, chooseEntropy, chooseMinSum, constant, filterAll } from './src/filter.mjs';
 
 const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
@@ -14,9 +14,7 @@ const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
 const FINAL = { bt: 1024, iterations: 22, patience: 2, chunk: 250, resplit: 3 };
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
-const LIGHT_BIG = { bt: 24, iterations: 1, chunk: 2000 };
-const SETTLE = 1.03;
-const BRUTES = [[0, 2], [40, 0]]; // [row-to-row filter stickiness in bytes, filter row 0 prefers] tried by the brute-force selector
+const BAND = 24; // rows per band in the band filter search
 
 function zlibSize(raw: Uint8Array): number {
   return deflateSync(raw, { level: 5, memLevel: 8, strategy: constants.Z_DEFAULT_STRATEGY }).length;
@@ -46,40 +44,39 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
   const bigImage = modes[0].mode.samples.length > 1e6;
   const keep = modes.filter((m: any, k: number) => k < (bigImage ? 1 : 3) && m.best <= modes[0].best * 1.03);
 
-  // Stage B: brute-force row filters for the leading representations, then zlib screens all the candidates and the
-  // real encoder (at light strength) settles the ones within a few percent of the best, since the zlib ranking is
-  // only good to about that.
+  // Stage B: row filters for the leading representations. The band search (each band of rows takes one filter, or
+  // the per-row brute-force choice, whichever compresses smallest after the 32 KiB before it) is the strong one; for
+  // a big image it is taken as it is, while a small image's candidates are settled by the real encoder at light
+  // strength (zlib misjudges the unfiltered form there by several percent).
   const pool: Cand[] = [];
   for (const m of keep) {
     m.cands.sort((a: Cand, b: Cand) => a.size - b.size);
+    const add = (name: string, raw: Uint8Array) => pool.push({ name: m.mode.name + '/' + name, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
+    const perRow = chooseBrute(m.all, height, m.rl, 6, 0, 2);
+    add('band', assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, 9, [perRow]), m.rl));
+    if (bigImage) continue;
     pool.push(m.cands[0]);
     if (!m.cands[0].name.endsWith('/f0')) pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
-    // two brute-force flavours: free to switch filters (starting on Paeth), and sticky on unfiltered rows
-    for (const [bias, first] of BRUTES) {
-      const raw = assembleRows(m.all, chooseBrute(m.all, height, m.rl, 6, bias, first), m.rl);
-      pool.push({ name: m.mode.name + '/brute' + bias, mode: m.mode, raw, size: zlibSize(raw) + (m.mode.plte?.length ?? 0) });
-    }
+    add('brute', assembleRows(m.all, perRow, m.rl));
   }
   pool.sort((a, b) => a.size - b.size);
-  // small images are judged by the real encoder, and the plain unfiltered form is tried first (zlib undervalues it)
-  const order = bigImage ? pool.filter((c) => c.name.includes('/brute')).sort((a, b) => a.size - b.size) : [...pool].sort((a, b) => Number(!a.name.endsWith('/f0')) - Number(!b.name.endsWith('/f0')) || a.size - b.size);
-  let win: Cand | null = null, winSize = Infinity;
-  const tried: Cand[] = [];
-  // (zlib ranks the row-filter flavours of a big image wrongly by up to 3%, so the two best go to the real encoder)
-  // (a big image whose two flavours zlib puts more than 1% apart is not worth the seconds: zlib's order is trusted)
-  const settled = bigImage && order.length > 1 && order[1].size > order[0].size * 1.01;
-  if (settled) { win = order[0]; winSize = order[0].size; }
-  else for (const c of order) {
-    if (c.size > pool[0].size * 1.3 || tried.length >= (bigImage ? 2 : 6)) continue;
-    if (tried.some((t) => t.mode === c.mode && Buffer.compare(t.raw, c.raw) === 0)) continue; // same bytes already weighed
-    tried.push(c);
-    const size = deflateOptimal(c.raw, bigImage ? LIGHT_BIG : LIGHT).length + (c.mode.plte?.length ?? 0);
-    if (DEBUG) console.error('  ', c.name, c.size, size);
-    if (size < winSize) { winSize = size; win = c; }
+  let win: Cand = pool.find((c) => c.name.endsWith('/band')) as Cand, winSize = win.size;
+  if (!bigImage) {
+    winSize = Infinity;
+    const order = [...pool].sort((a, b) => Number(!a.name.endsWith('/f0')) - Number(!b.name.endsWith('/f0')) || a.size - b.size);
+    const tried: Cand[] = [];
+    for (const c of order) {
+      if (c.size > pool[0].size * 1.3 || tried.length >= 6) continue;
+      if (tried.some((t) => t.mode === c.mode && Buffer.compare(t.raw, c.raw) === 0)) continue; // same bytes already weighed
+      tried.push(c);
+      const size = deflateOptimal(c.raw, LIGHT).length + (c.mode.plte?.length ?? 0);
+      if (DEBUG) console.error('  ', c.name, c.size, size);
+      if (size < winSize) { winSize = size; win = c; }
+    }
   }
   // Stage C: the winner at full strength.
-  if (DEBUG) console.error((win as unknown as Cand).name, winSize);
-  return png(win as unknown as Cand, FINAL);
+  if (DEBUG) console.error(win.name, winSize);
+  return png(win, FINAL);
 }
 
 for (const id of readdirSync(I).sort()) {

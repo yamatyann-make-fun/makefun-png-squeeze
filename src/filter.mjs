@@ -120,3 +120,44 @@ export function chooseBrute(all, height, rl, level = 6, bias = 0, first = 0) {
   }
   return choice;
 }
+
+/**
+ * Band search: rows are taken in bands of `band` rows. For each band every candidate filtering of it (each filter for
+ * the whole band, and the per-row brute-force choice) is compressed as raw deflate primed with the 32 KiB written
+ * before it, and the smallest is kept. A band of one filter keeps rows matching each other; the brute-force rows
+ * win where the content changes inside the band.
+ */
+export function chooseBands(all, height, rl, band = 16, level = 9, perRow = null, ahead = null) {
+  const choice = new Uint8Array(height);
+  const hist = new Uint8Array(32768);
+  let have = 0;
+  const buf = new Uint8Array(band * rl * 2);
+  const opts = (dict) => ({ level, memLevel: 9, dictionary: dict });
+  for (let y0 = 0; y0 < height; y0 += band) {
+    const y1 = Math.min(height, y0 + band), rows = y1 - y0;
+    const dict = have > 0 ? hist.slice(0, have) : undefined;
+    const fill = (pick) => { for (let y = y0; y < y1; y++) buf.set(all[pick(y)].subarray(y * rl, (y + 1) * rl), (y - y0) * rl); };
+    let best = Infinity, bestPick = null;
+    const cands = [0, 1, 2, 3, 4].map((t) => () => t);
+    for (const pr of perRow ? (Array.isArray(perRow) ? perRow : [perRow]) : []) cands.push((y) => pr[y]);
+    const y2 = ahead ? Math.min(height, y1 + band) : y1;
+    for (const pick of cands) {
+      fill(pick);
+      for (let y = y1; y < y2; y++) buf.set(all[ahead[y]].subarray(y * rl, (y + 1) * rl), (y - y0) * rl);
+      const z = deflateRawSync(buf.subarray(0, (y2 - y0) * rl), opts(dict)).length;
+      if (z < best) { best = z; bestPick = pick; }
+    }
+    for (let y = y0; y < y1; y++) choice[y] = bestPick(y);
+    fill(bestPick);
+    // slide the history window
+    const add = rows * rl;
+    if (have + add > 32768) {
+      const keep = Math.max(0, 32768 - add);
+      hist.copyWithin(0, have - keep, have);
+      have = keep;
+    }
+    const src = buf.subarray(Math.max(0, add - 32768), add);
+    hist.set(src, have); have += src.length;
+  }
+  return choice;
+}
