@@ -1,6 +1,7 @@
 // Our own DEFLATE encoder: hash-chain match search, cost-model optimal parsing (iterated), adaptive block splitting,
 // per-block dynamic Huffman codes. Everything is bounded by work, never by the clock, so output is deterministic.
 import { adler32 } from './png.mjs';
+import { wasmAvailable, workspace } from './wasm.mjs';
 import { bestHeader, CL_ORDER, CL_EXTRA, huffLengths, makeCodes } from './huffman.mjs';
 
 const LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
@@ -162,6 +163,12 @@ function parse(data, mm, tables, blockStart, sparse = 258, scratch = null) {
       from = len + 1;
     }
   }
+  return traceback(data, pLen, pDist);
+}
+
+/** Tokens of the cheapest path, read back from the step lengths and distances that reach each position. */
+function traceback(data, pLen, pDist) {
+  const n = data.length;
   let cnt = 0;
   for (let p = n; p > 0; p -= pLen[p]) cnt++;
   const tl = new Uint16Array(cnt), td = new Uint16Array(cnt), tp = new Int32Array(cnt);
@@ -339,7 +346,14 @@ export function deflateOptimal(data, opts = {}) {
   const patience = opts.patience ?? 1e9;
   const chain = opts.chain ?? 64, iterations = opts.iterations ?? 3, chunk = opts.chunk ?? 600;
   const n = data.length;
-  const mm = opts.bt ? findMatchesBT(data, opts.bt) : findMatches(data, chain, opts.nice ?? 258);
+  // the WASM kernels (same algorithm, about twice as fast) when the runtime has WebAssembly, else the JS ones
+  const ws = opts.bt && opts.wasm !== false && wasmAvailable() ? workspace(data, opts.bt, DIST_SYM) : null;
+  const mm = ws ? ws.view() : opts.bt ? findMatchesBT(data, opts.bt) : findMatches(data, chain, opts.nice ?? 258);
+  const runParse = (tables, blockStart) => {
+    if (!ws) return parse(data, mm, tables, blockStart, opts.sparse ?? 258, scratch);
+    const v = ws.parse(tables, blockStart);
+    return traceback(data, v.plen, v.pdist);
+  };
   const lit = new Int32Array(288), dist = new Int32Array(30);
   // first model: statistics of a greedy (longest match) parse
   const tab0 = newTables();
@@ -363,8 +377,8 @@ export function deflateOptimal(data, opts = {}) {
       for (let l = 3; l <= 258; l++) tab0.len[l] += opts.litPenalty ?? 2;
     }
   }
-  const scratch = { cost: new Float64Array(n + 1), pLen: new Uint16Array(n + 1), pDist: new Uint16Array(n + 1) };
-  let tok = parse(data, mm, [tab0], [0], opts.sparse ?? 258, scratch);
+  const scratch = ws ? null : { cost: new Float64Array(n + 1), pLen: new Uint16Array(n + 1), pDist: new Uint16Array(n + 1) };
+  let tok = runParse([tab0], [0]);
   let best = null, bestIt = 0, prevPos = null;
   const resplit = opts.resplit ?? 1;
   for (let it = 0; ; it++) {
@@ -393,7 +407,7 @@ export function deflateOptimal(data, opts = {}) {
       tables.push(tablesFrom(lit, dist, newTables()));
       blockStart.push(tok.tp[starts[k]]);
     }
-    tok = parse(data, mm, tables, blockStart, opts.sparse ?? 258, scratch);
+    tok = runParse(tables, blockStart);
   }
   const w = new Bits(Math.max(1024, n >> 2));
   w.put(0x78, 8); w.put(0xda, 8);
