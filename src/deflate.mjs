@@ -11,6 +11,9 @@ const DIST_XB = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 
 const LEN_SYM = new Uint16Array(259); // match length -> length symbol index 0..28
 for (let s = 0; s < 29; s++) for (let l = LEN_BASE[s]; l < (s < 28 ? LEN_BASE[s + 1] : 259); l++) LEN_SYM[l] = s;
 LEN_SYM[258] = 28;
+// NEXT_TOP[l]: the smallest length >= l that is the last of its length code
+const NEXT_TOP = new Uint16Array(261);
+for (let l = 260; l >= 0; l--) NEXT_TOP[l] = l >= 258 ? 258 : (l >= 3 && LEN_SYM[l + 1] !== LEN_SYM[l]) ? l : NEXT_TOP[l + 1];
 const DIST_SYM = new Uint8Array(32769);
 for (let s = 0; s < 30; s++) for (let d = DIST_BASE[s]; d < (s < 29 ? DIST_BASE[s + 1] : 32769); d++) DIST_SYM[d] = s;
 
@@ -123,7 +126,7 @@ function tablesFrom(litHist, distHist, tab) {
 // blockStart[k] is the first position governed by tables[k]. Returns tokens { tl, td, tp, count }:
 // tl = match length (0 for a literal), td = literal byte or match distance, tp = start position.
 
-function parse(data, mm, tables, blockStart) {
+function parse(data, mm, tables, blockStart, sparse = 258) {
   const n = data.length, { off, pool } = mm;
   const cost = new Float64Array(n + 1).fill(Infinity);
   const pLen = new Uint16Array(n + 1), pDist = new Uint16Array(n + 1);
@@ -140,9 +143,20 @@ function parse(data, mm, tables, blockStart) {
       const dc = ci + tab.dist[DIST_SYM[dist]];
       // a maximal match inside a long run: only the full length is worth relaxing (keeps flat areas cheap)
       if (len === 258) from = 258;
-      for (let l = from; l <= len; l++) {
+      const full = len < sparse ? len : sparse;
+      for (let l = from; l <= full; l++) {
         const c = dc + tab.len[l];
         if (c < cost[i + l]) { cost[i + l] = c; pLen[i + l] = l; pDist[i + l] = dist - 1; }
+      }
+      if (len > full) {
+        // past `sparse`, only the last length of each length code (they all cost the same) and the match's own
+        // length are relaxed: the dropped ones would land on positions a longer step reaches for the same price
+        for (let l = NEXT_TOP[from > full ? from : full + 1]; l < len; l = NEXT_TOP[l + 1]) {
+          const c = dc + tab.len[l];
+          if (c < cost[i + l]) { cost[i + l] = c; pLen[i + l] = l; pDist[i + l] = dist - 1; }
+        }
+        const c = dc + tab.len[len];
+        if (c < cost[i + len]) { cost[i + len] = c; pLen[i + len] = len; pDist[i + len] = dist - 1; }
       }
       from = len + 1;
     }
@@ -337,8 +351,18 @@ export function deflateOptimal(data, opts = {}) {
     }
     hl[256] = 1;
     tablesFrom(hl, hd, tab0);
+    if (opts.init === 'lit') {
+      // literal-heavy start: literals priced by their own order-0 statistics, every match made dearer
+      const lh = new Int32Array(288), z = new Int32Array(30);
+      for (let i = 0; i < n; i++) lh[data[i]]++;
+      for (let s2 = 257; s2 < 286; s2++) lh[s2] = hl[s2];
+      lh[256] = 1;
+      const t = tablesFrom(lh, hd, newTables());
+      tab0.lit.set(t.lit);
+      for (let l = 3; l <= 258; l++) tab0.len[l] += opts.litPenalty ?? 2;
+    }
   }
-  let tok = parse(data, mm, [tab0], [0]);
+  let tok = parse(data, mm, [tab0], [0], opts.sparse ?? 258);
   let best = null, bestIt = 0, prevPos = null;
   const resplit = opts.resplit ?? 1;
   for (let it = 0; ; it++) {
@@ -367,7 +391,7 @@ export function deflateOptimal(data, opts = {}) {
       tables.push(tablesFrom(lit, dist, newTables()));
       blockStart.push(tok.tp[starts[k]]);
     }
-    tok = parse(data, mm, tables, blockStart);
+    tok = parse(data, mm, tables, blockStart, opts.sparse ?? 258);
   }
   const w = new Bits(Math.max(1024, n >> 2));
   w.put(0x78, 8); w.put(0xda, 8);

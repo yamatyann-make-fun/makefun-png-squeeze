@@ -12,7 +12,7 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const FINAL = { bt: 1024, iterations: 22, patience: 2, chunk: 250, resplit: 3, refine: [50, 6] };
+const FINAL = { bt: 1024, iterations: 8, patience: 1, chunk: 250, resplit: 3, refine: [50, 6], init: 'lit', litPenalty: 3 };
 const LIGHT = { bt: 64, iterations: 1, chunk: 800 };
 const BAND = 24; // rows per band in the band filter search
 
@@ -27,7 +27,9 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     assemblePng(width, height, c.mode.ctype, c.mode.plte ?? null, c.mode.trns ?? null, deflateOptimal(c.raw, opts));
 
   // Stage A: every representation with the cheap filter strategies, weighed by zlib.
-  const built = buildModes(rgba, width, height);
+  let built = buildModes(rgba, width, height);
+  // a grey image is never smaller as a palette (same one byte a pixel, plus a PLTE chunk): skip the palette forms
+  if (built.some((m: any) => m.ctype === 0 || m.ctype === 4)) built = built.filter((m: any) => m.ctype !== 3);
   const modes = built.map((mode: any) => {
     const rl = width * mode.bpp + 1;
     const all = filterAll(mode.samples, width, height, mode.bpp);
