@@ -12,8 +12,7 @@ const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
 const O = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 const DEBUG = !!process.env.SQUEEZE_DEBUG;
 
-const QUICK = { chain: 24, iterations: 1, chunk: 500 };
-const FINAL = { chain: 256, iterations: 8, chunk: 300, nice: 258 };
+const FINAL = { chain: 256, iterations: 24, patience: 3, chunk: 300, nice: 258 };
 const BIASES = [0, 40]; // row-to-row filter stickiness tried by the brute-force selector (bytes)
 
 function zlibSize(raw: Uint8Array): number {
@@ -44,10 +43,10 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
   const keep = modes.filter((m: any, k: number) => k < 2 && m.best <= modes[0].best * 1.015);
 
   // Stage B: for the leading representation(s), brute-force row filters at several stickiness levels, plus the
-  // best cheap strategy, each finished with a quick optimal parse; the smallest goes on.
+  // best cheap strategy, each weighed by zlib; the smallest goes on.
   let win: Cand | null = null, winSize = Infinity;
   const consider = (c: Cand) => {
-    const size = png(c, QUICK).length;
+    const size = zlibSize(c.raw) + (c.mode.plte?.length ?? 0);
     if (DEBUG) console.error('  ', c.name, size);
     if (size < winSize) { winSize = size; win = c; }
   };

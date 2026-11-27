@@ -59,13 +59,15 @@ function newTables() {
   return { lit: new Float64Array(256), len: new Float64Array(259), dist: new Float64Array(30) };
 }
 
+let UNUSED = 99;
+export function setUnused(v) { UNUSED = v; }
 function tablesFrom(litHist, distHist, tab) {
   let tl = 0, td = 0;
   for (let s = 0; s < 286; s++) tl += litHist[s];
   for (let s = 0; s < 30; s++) td += distHist[s];
   tl = Math.max(tl, 1); td = Math.max(td, 1);
-  const bitsL = (c) => (c > 0 ? Math.log2(tl / c) : Math.log2(tl) + 1);
-  const bitsD = (c) => (c > 0 ? Math.log2(td / c) : Math.log2(td) + 1);
+  const bitsL = (c) => (c > 0 ? Math.log2(tl / c) : Math.min(UNUSED, Math.log2(tl) + 1));
+  const bitsD = (c) => (c > 0 ? Math.log2(td / c) : Math.min(UNUSED, Math.log2(td) + 1));
   for (let b = 0; b < 256; b++) tab.lit[b] = bitsL(litHist[b]);
   for (let l = 3; l <= 258; l++) { const s = LEN_SYM[l]; tab.len[l] = bitsL(litHist[257 + s]) + LEN_XB[s]; }
   for (let s = 0; s < 30; s++) tab.dist[s] = bitsD(distHist[s]) + DIST_XB[s];
@@ -248,6 +250,7 @@ function writeBlock(w, tok, a, b, last, lit, dist) {
 
 /** Compress `data` into a zlib stream. opts: { chain, iterations, chunk }. */
 export function deflateOptimal(data, opts = {}) {
+  const patience = opts.patience ?? 1e9;
   const chain = opts.chain ?? 64, iterations = opts.iterations ?? 3, chunk = opts.chunk ?? 600;
   const n = data.length;
   const mm = findMatches(data, chain, opts.nice ?? 258);
@@ -265,14 +268,15 @@ export function deflateOptimal(data, opts = {}) {
     tablesFrom(hl, hd, tab0);
   }
   let tok = parse(data, mm, [tab0], [0]);
-  let best = null;
+  let best = null, bestIt = 0;
   for (let it = 0; ; it++) {
     const starts = splitBlocks(tok, chunk);
     const ends = starts.map((s, k) => (k + 1 < starts.length ? starts[k + 1] : tok.count));
     let bits = 0;
     for (let k = 0; k < starts.length; k++) { histogram(tok, starts[k], ends[k], lit, dist); bits += blockBits(lit, dist); }
-    if (best === null || bits < best.bits) best = { bits, tok, starts, ends };
-    if (it + 1 >= iterations) break;
+    if (opts.trace) console.error('iter', it, Math.round(bits / 8), 'blocks', starts.length);
+    if (best === null || bits < best.bits) { best = { bits, tok, starts, ends }; bestIt = it; }
+    if (it + 1 >= iterations || it - bestIt >= patience) break;
     // per-block cost tables from this parse, then parse again
     const tables = [], blockStart = [];
     for (let k = 0; k < starts.length; k++) {
