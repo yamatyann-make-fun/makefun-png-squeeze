@@ -104,7 +104,7 @@ export function chooseBrute(all, height, rl, level = 6, bias = 0, first = 0) {
     const dict = have > 0 ? Uint8Array.from(dictOf()) : undefined;
     for (let t = 0; t < 5; t++) {
       const row = all[t].subarray(y * rl, (y + 1) * rl);
-      const z = deflateRawSync(row, { level, memLevel: 9, dictionary: dict });
+      const z = deflateRawSync(row, { level, memLevel: 8, dictionary: dict });
       const cost = z.length - (t === prev ? bias : 0);
       if (cost < best) { best = cost; choice[y] = t; }
     }
@@ -132,7 +132,7 @@ export function chooseBands(all, height, rl, band = 16, level = 9, perRow = null
   const hist = new Uint8Array(32768);
   let have = 0;
   const buf = new Uint8Array(band * rl * 2);
-  const opts = (dict) => ({ level, memLevel: 9, dictionary: dict });
+  const opts = (dict) => ({ level, memLevel: 8, dictionary: dict });
   for (let y0 = 0; y0 < height; y0 += band) {
     const y1 = Math.min(height, y0 + band), rows = y1 - y0;
     const dict = have > 0 ? hist.slice(0, have) : undefined;
