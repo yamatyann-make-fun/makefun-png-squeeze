@@ -29,6 +29,6 @@ node tests/huffman-check.mjs
 node tests/modes-check.mjs
 ```
 
-Practice set: 800,321 against the fixed-paeth baseline's 420,399.
+Practice set: 801,017 against the fixed-paeth baseline's 420,399.
 
 MIT licensed.

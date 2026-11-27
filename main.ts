@@ -64,7 +64,16 @@ function squeeze(rgba: Uint8Array, width: number, height: number): Uint8Array {
     const same = bigImage ? null : sameRows(m.mode.samples, m.rl - 1, height);
     // (no per-row brute force: its thousands of small zlib calls cost ~2 ms each in the grader's sandbox)
     const perRow: Uint8Array[] = [];
-    for (const lv of bigImage ? BAND_LEVELS_BIG : BAND_LEVELS_SMALL) add('band' + lv, assembleRows(m.all, chooseBands(m.all, height, m.rl, BAND, lv, perRow, null, same, same ? 1 : 0), m.rl));
+    const grey = m.mode.ctype === 0 || m.mode.ctype === 4;
+    // Average (filter 3) only ever wins bands of grey images; elsewhere it is not tried
+    const filters = grey ? [0, 1, 2, 3, 4] : [0, 1, 2, 4];
+    for (const lv of bigImage ? BAND_LEVELS_BIG : BAND_LEVELS_SMALL) {
+      let choice = chooseBands(m.all, height, m.rl, BAND, lv, perRow, null, same, same ? 1 : 0, filters);
+      // grey images: a second, finer pass (bands of 8 rows, each judged with the 8 rows after it as they stand)
+      // refines the choice by about 1%; palette and colour images gain nothing from it
+      if (grey) choice = chooseBands(m.all, height, m.rl, 8, 6, [choice], choice, null, 0, filters);
+      add('band' + lv, assembleRows(m.all, choice, m.rl));
+    }
     if (bigImage || !LIGHT_SETTLE) continue;
     pool.push(m.cands.find((c: Cand) => c.name.endsWith('/f0')) as Cand);
   }
